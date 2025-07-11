@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Server Manager</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .status-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.stopped {
+            background-color: #ff4757;
+        }
+
+        .status-dot.starting {
+            background-color: #ffa502;
+            animation: pulse 1s infinite;
+        }
+
+        .status-dot.running {
+            background-color: #2ed573;
+        }
+
+        .status-dot.stopping {
+            background-color: #ff6348;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-start {
+            background: linear-gradient(45deg, #2ed573, #1e90ff);
+            color: white;
+        }
+
+        .btn-stop {
+            background: linear-gradient(45deg, #ff4757, #ff6348);
+            color: white;
+        }
+
+        .command-section {
+            margin-top: 20px;
+        }
+
+        .command-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .command-input input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .command-input input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn-send {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .log-container {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Courier New', monospace;
+            color: #00ff00;
+            font-size: 13px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .log-entry {
+            margin-bottom: 2px;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+
+        .log-error {
+            color: #ff6b6b;
+        }
+
+        .log-info {
+            color: #74c0fc;
+        }
+
+        .log-warn {
+            color: #ffd43b;
+        }
+
+        .section-title {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-weight: 500;
+        }
+
+        .message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f1aeb5;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 Minecraft Server Manager</h1>
+            <p>CraftBukkit 1.21.5 サーバー管理システム</p>
+        </div>
+
+        <div class="status-card">
+            <div class="status-indicator">
+                <div id="statusDot" class="status-dot stopped"></div>
+                <span id="statusText">サーバー停止中</span>
+            </div>
+
+            <div class="controls">
+                <button id="startBtn" class="btn btn-start">🚀 サーバー開始</button>
+                <button id="stopBtn" class="btn btn-stop" disabled>🛑 サーバー停止</button>
+            </div>
+
+            <div id="messageArea"></div>
+        </div>
+
+        <div class="status-card">
+            <div class="section-title">📝 コマンド実行</div>
+            <div class="command-input">
+                <input type="text" id="commandInput" placeholder="Minecraftコマンドを入力 (例: say Hello World!)" disabled>
+                <button id="sendBtn" class="btn btn-send" disabled>📤 送信</button>
+            </div>
+        </div>
+
+        <div class="status-card">
+            <div class="section-title">📊 サーバーログ</div>
+            <div id="logContainer" class="log-container">
+                <div class="log-entry">サーバーログがここに表示されます...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const commandInput = document.getElementById('commandInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const logContainer = document.getElementById('logContainer');
+        const messageArea = document.getElementById('messageArea');
+
+        let currentStatus = 'stopped';
+
+        // サーバー状態の更新
+        function updateStatus(status) {
+            currentStatus = status;
+            statusDot.className = `status-dot ${status}`;
+            
+            switch(status) {
+                case 'stopped':
+                    statusText.textContent = 'サーバー停止中';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    commandInput.disabled = true;
+                    sendBtn.disabled = true;
+                    break;
+                case 'starting':
+                    statusText.textContent = 'サーバー起動中...';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    commandInput.disabled = true;
+                    sendBtn.disabled = true;
+                    break;
+                case 'running':
+                    statusText.textContent = 'サーバー実行中';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    commandInput.disabled = false;
+                    sendBtn.disabled = false;
+                    break;
+                case 'stopping':
+                    statusText.textContent = 'サーバー停止中...';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = true;
+                    commandInput.disabled = true;
+                    sendBtn.disabled = true;
+                    break;
+            }
+        }
+
+        // メッセージ表示
+        function showMessage(message, type = 'success') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = message;
+            messageArea.appendChild(messageDiv);
+            
+            setTimeout(() => {
+                messageDiv.remove();
+            }, 5000);
+        }
+
+        // ログに追加
+        function addLog(text, isError = false) {
+            // 空行や無意味な文字列をフィルタリング
+            const cleanText = text.trim();
+            if (!cleanText || cleanText === '>' || cleanText.length < 3) {
+                return;
+            }
+            
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            
+            // ログレベルに応じた色分け
+            if (isError || cleanText.includes('ERROR') || cleanText.includes('Exception')) {
+                logEntry.className += ' log-error';
+            } else if (cleanText.includes('WARN')) {
+                logEntry.className += ' log-warn';
+            } else if (cleanText.includes('INFO')) {
+                logEntry.className += ' log-info';
+            }
+            
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${cleanText}`;
+            logContainer.appendChild(logEntry);
+            
+            // ログが多くなりすぎないように制限
+            const logEntries = logContainer.querySelectorAll('.log-entry');
+            if (logEntries.length > 500) {
+                logEntries[0].remove();
+            }
+            
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        // WebSocketイベント
+        socket.on('serverStatus', (data) => {
+            updateStatus(data.status);
+        });
+
+        socket.on('serverLog', (data) => {
+            addLog(data);
+        });
+
+        socket.on('serverError', (data) => {
+            addLog(data, true);
+        });
+
+        // ボタンイベント
+        startBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/start', { method: 'POST' });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMessage(data.message);
+                } else {
+                    showMessage(data.error, 'error');
+                }
+            } catch (error) {
+                showMessage('サーバーとの通信エラーが発生しました', 'error');
+            }
+        });
+
+        stopBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/stop', { method: 'POST' });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMessage(data.message);
+                } else {
+                    showMessage(data.error, 'error');
+                }
+            } catch (error) {
+                showMessage('サーバーとの通信エラーが発生しました', 'error');
+            }
+        });
+
+        // コマンド送信
+        async function sendCommand() {
+            const command = commandInput.value.trim();
+            if (!command) return;
+
+            try {
+                const response = await fetch('/api/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    addLog(`> ${command}`);
+                    commandInput.value = '';
+                } else {
+                    showMessage(data.error, 'error');
+                }
+            } catch (error) {
+                showMessage('コマンド送信エラーが発生しました', 'error');
+            }
+        }
+
+        sendBtn.addEventListener('click', sendCommand);
+        commandInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendCommand();
+            }
+        });
+
+        // 初期状態を取得
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => updateStatus(data.status))
+            .catch(error => console.error('初期状態の取得に失敗:', error));
+    </script>
+</body>
+</html>
