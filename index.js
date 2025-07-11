@@ -5,6 +5,11 @@ const pty = require('@lydell/node-pty');
 const path = require('path');
 const fs = require('fs');
 
+// 認証関連のモジュールをインポート
+const authRoutes = require('./authRoutes');
+const { authenticateToken, optionalAuth } = require('./auth');
+require('./database'); // データベースの初期化
+
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
@@ -12,6 +17,9 @@ const io = socketIo(server);
 // 静的ファイルの提供
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
+
+// 認証ルートを追加
+app.use('/api/auth', authRoutes);
 
 // Minecraftサーバーのプロセス
 let minecraftServer = null;
@@ -27,16 +35,26 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// サーバー状態取得API
-app.get('/api/status', (req, res) => {
+// ログインページ
+app.get('/login.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// サーバー状態取得API（認証不要）
+app.get('/api/status', optionalAuth, (req, res) => {
     res.json({
         status: serverStatus,
-        pid: minecraftServer ? minecraftServer.pid : null
+        pid: minecraftServer ? minecraftServer.pid : null,
+        authenticated: !!req.user,
+        user: req.user ? {
+            username: req.user.username,
+            role: req.user.role
+        } : null
     });
 });
 
-// サーバー開始API
-app.post('/api/start', (req, res) => {
+// サーバー開始API（認証必要）
+app.post('/api/start', authenticateToken, (req, res) => {
     if (minecraftServer) {
         return res.status(400).json({ error: 'サーバーは既に実行中です' });
     }
@@ -110,8 +128,8 @@ function stripAnsiCodes(text) {
     }
 });
 
-// サーバー停止API
-app.post('/api/stop', (req, res) => {
+// サーバー停止API（認証必要）
+app.post('/api/stop', authenticateToken, (req, res) => {
     if (!minecraftServer) {
         return res.status(400).json({ error: 'サーバーは実行されていません' });
     }
@@ -120,8 +138,8 @@ app.post('/api/stop', (req, res) => {
     res.json({ message: 'サーバーを停止中です' });
 });
 
-// コマンド送信API
-app.post('/api/command', (req, res) => {
+// コマンド送信API（認証必要）
+app.post('/api/command', authenticateToken, (req, res) => {
     const { command } = req.body;
     console.log(`コマンド送信要求を受信: ${command}`);
     if (!minecraftServer) {
@@ -143,8 +161,8 @@ app.post('/api/command', (req, res) => {
     }
 });
 
-// デバッグ用テストAPI
-app.post('/api/test', (req, res) => {
+// デバッグ用テストAPI（管理者のみ）
+app.post('/api/test', authenticateToken, (req, res) => {
     console.log('テストAPI呼び出し');
     
     if (!minecraftServer) {

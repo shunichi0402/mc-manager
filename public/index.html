@@ -29,12 +29,46 @@
             text-align: center;
             margin-bottom: 30px;
             color: white;
+            position: relative;
         }
 
         .header h1 {
             font-size: 2.5em;
             margin-bottom: 10px;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .auth-info {
+            position: absolute;
+            top: 0;
+            right: 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 25px;
+            backdrop-filter: blur(10px);
+        }
+
+        .user-info {
+            color: white;
+            font-weight: 600;
+        }
+
+        .logout-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+
+        .logout-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
         }
 
         .status-card {
@@ -233,6 +267,10 @@
 <body>
     <div class="container">
         <div class="header">
+            <div class="auth-info" id="authInfo" style="display: none;">
+                <div class="user-info" id="userInfo"></div>
+                <button class="logout-btn" onclick="logout()">ログアウト</button>
+            </div>
             <h1>🎮 Minecraft Server Manager</h1>
             <p>CraftBukkit 1.21.5 サーバー管理システム</p>
         </div>
@@ -268,6 +306,95 @@
     </div>
 
     <script>
+        // 認証関連の変数
+        let currentUser = null;
+        let authToken = null;
+
+        // 認証チェック
+        async function checkAuth() {
+            const token = localStorage.getItem('token');
+            const user = localStorage.getItem('user');
+            
+            if (!token || !user) {
+                window.location.href = '/login.html';
+                return false;
+            }
+
+            try {
+                const response = await fetch('/api/auth/verify', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentUser = data.user;
+                    authToken = token;
+                    updateAuthUI();
+                    return true;
+                } else {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    window.location.href = '/login.html';
+                    return false;
+                }
+            } catch (error) {
+                console.error('認証エラー:', error);
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+                return false;
+            }
+        }
+
+        // 認証UIの更新
+        function updateAuthUI() {
+            if (currentUser) {
+                const authInfo = document.getElementById('authInfo');
+                const userInfo = document.getElementById('userInfo');
+                
+                userInfo.textContent = `${currentUser.username} (${currentUser.role})`;
+                authInfo.style.display = 'flex';
+            }
+        }
+
+        // ログアウト
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = '/login.html';
+        }
+
+        // 認証付きAPIリクエスト
+        async function authenticatedFetch(url, options = {}) {
+            if (!authToken) {
+                throw new Error('認証トークンがありません');
+            }
+
+            const headers = {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+
+            const response = await fetch(url, {
+                ...options,
+                headers
+            });
+
+            if (response.status === 401 || response.status === 403) {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/login.html';
+                throw new Error('認証が必要です');
+            }
+
+            return response;
+        }
+
         const socket = io();
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -377,7 +504,7 @@
         // ボタンイベント
         startBtn.addEventListener('click', async () => {
             try {
-                const response = await fetch('/api/start', { method: 'POST' });
+                const response = await authenticatedFetch('/api/start', { method: 'POST' });
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -392,7 +519,7 @@
 
         stopBtn.addEventListener('click', async () => {
             try {
-                const response = await fetch('/api/stop', { method: 'POST' });
+                const response = await authenticatedFetch('/api/stop', { method: 'POST' });
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -411,9 +538,8 @@
             if (!command) return;
 
             try {
-                const response = await fetch('/api/command', {
+                const response = await authenticatedFetch('/api/command', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ command })
                 });
                 
@@ -437,11 +563,21 @@
             }
         });
 
-        // 初期状態を取得
-        fetch('/api/status')
-            .then(response => response.json())
-            .then(data => updateStatus(data.status))
-            .catch(error => console.error('初期状態の取得に失敗:', error));
+        // ページ読み込み時の処理
+        window.addEventListener('DOMContentLoaded', async () => {
+            // 認証チェック
+            const isAuthenticated = await checkAuth();
+            if (!isAuthenticated) return;
+
+            // 初期状態を取得
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                updateStatus(data.status);
+            } catch (error) {
+                console.error('初期状態の取得に失敗:', error);
+            }
+        });
     </script>
 </body>
 </html>
